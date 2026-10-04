@@ -8,6 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sh -n s5.sh && python3 tests/validate.py
+      - run: python3 tests/test_public_host.py
       - run: shellcheck --shell=sh s5.sh
   integration:
     runs-on: ubuntu-latest

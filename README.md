@@ -4,17 +4,35 @@
 
 脚本风格参考 [vless-reality](https://github.com/axixiansheng/vless-reality)，支持交互菜单、安装、查看信息、状态、连通检查、更新、重启和卸载。
 
-## 一键运行
+## 一键安装
 
-以 **root** 执行。以下命令适用于精简 Alpine、Debian 和 Ubuntu：先补齐下载工具与 CA 证书，下载成功后才运行脚本；下载或安装失败会保留错误并返回非零退出码。
+以 **root** 在 Bash 终端执行，和 vless-reality 一样，填上 NAT 已映射端口即可安装：
 
-```sh
-sh -c 'set -eu; umask 077; if command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl; elif command -v apt-get >/dev/null 2>&1; then apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update; DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates curl; else echo "错误: 仅支持 Alpine / Debian / Ubuntu" >&2; exit 1; fi; f=$(mktemp); trap "rm -f \"$f\"" EXIT; curl -fSL --retry 3 --connect-timeout 10 --max-time 90 https://raw.githubusercontent.com/axixiansheng/s5-proxy/main/s5.sh -o "$f"; sh "$f" "$@"' s5
+```bash
+PORT=54352 bash <(curl -fsSL https://raw.githubusercontent.com/axixiansheng/s5-proxy/main/s5.sh) install
 ```
 
-无参数进入菜单，安装时填写 **内网监听端口、外网映射端口、公网 IPv4 或域名**。不自动把 NAT 出口 IP 当作入站地址。
+首次安装自动检测公网 IPv4，外网端口默认等于 `PORT`，用户名密码自动生成。安装程序自动检测并安装自身依赖；重复安装保留原地址、端口和账号。
 
-已经有 curl 和 CA 证书时，也可以先保存到本机，便于后续管理：
+**Alpine 默认 ash 终端**或没有 Bash 时，使用下面这条同样一步执行的命令（已有 curl）：
+
+```sh
+PORT=54352 sh -c 's=$(curl -fsSL https://raw.githubusercontent.com/axixiansheng/s5-proxy/main/s5.sh) && sh -c "$s" s5 install'
+```
+
+无需先下载到文件，再分开执行。若 curl 也没有，使用下一节的自动准备命令。
+
+## 极简系统自动准备并安装
+
+这条仍是一步执行：自动补齐下载工具与 CA 证书，下载成功后运行安装。按需修改开头的端口；也可以给它添加其他环境变量。
+
+```sh
+PORT=54352 sh -c 'set -eu; umask 077; if command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl; elif command -v apt-get >/dev/null 2>&1; then apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update; DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates curl; else echo "错误: 仅支持 Alpine / Debian / Ubuntu" >&2; exit 1; fi; f=$(mktemp); trap "rm -f \"$f\"" EXIT; curl -fSL --retry 3 --connect-timeout 10 --max-time 90 https://raw.githubusercontent.com/axixiansheng/s5-proxy/main/s5.sh -o "$f"; sh "$f" "$@"' s5 install
+```
+
+去掉末尾的 `install` 可进入交互菜单。自动检测得到的是本机的公网出口 IPv4；供应商入站映射地址不同或有多个公网地址时，显式填写 `PUBLIC_HOST`。
+
+也可以保存脚本，便于后续管理：
 
 ```sh
 curl -fSL --retry 3 --connect-timeout 10 --max-time 90 \
@@ -27,18 +45,18 @@ sh /root/s5.sh
 例如供应商映射为 **公网 `203.0.113.10:54352` → 内网 `54352`**：
 
 ```sh
-PORT=54352 PUBLIC_PORT=54352 PUBLIC_HOST=203.0.113.10 sh /root/s5.sh install
+PORT=54352 PUBLIC_HOST=203.0.113.10 bash <(curl -fsSL https://raw.githubusercontent.com/axixiansheng/s5-proxy/main/s5.sh) install
 ```
 
 上面的 `203.0.113.10` 是文档示例地址，请替换成自己的公网 IP。两端端口不同也支持：
 
 ```sh
-PORT=1080 PUBLIC_PORT=54352 PUBLIC_HOST=203.0.113.10 sh /root/s5.sh install
+PORT=1080 PUBLIC_PORT=54352 PUBLIC_HOST=203.0.113.10 bash <(curl -fsSL https://raw.githubusercontent.com/axixiansheng/s5-proxy/main/s5.sh) install
 ```
 
-精简系统直接非交互安装时，在“一键运行”整条命令前加上 `PORT=... PUBLIC_PORT=... PUBLIC_HOST=...`，并将末尾 `s5` 改为 `s5 install`。
+上述环境变量同样适用于 Alpine ash 的单行命令或极简系统自动准备命令。
 
-首次安装必须明确 `PORT` 和 `PUBLIC_HOST`；没有默认开放端口。脚本检查本机监听冲突，但供应商 NAT 映射及已有防火墙规则需要在相应面板配置。公网连通性必须从另一台机器验证。
+首次安装只必须明确 `PORT`；没有默认开放端口。公网 IP 检测有多个后备接口，全部失败时报告原因并提示设置 `PUBLIC_HOST`。脚本检查本机监听冲突，供应商 NAT 映射及已有防火墙规则需要在相应面板配置。
 
 ## 特性与行为
 
@@ -58,7 +76,7 @@ PORT=1080 PUBLIC_PORT=54352 PUBLIC_HOST=203.0.113.10 sh /root/s5.sh install
 | --- | --- | --- |
 | `PORT` | 首次必填，之后复用 | 本机内网监听端口，1–65535 |
 | `PUBLIC_PORT` | 首次等于 `PORT`，之后复用 | 客户端连接的外网映射端口 |
-| `PUBLIC_HOST` | 首次必填，之后复用 | NAT 入站公网 IPv4 或具有 A 记录的域名 |
+| `PUBLIC_HOST` | 首次自动检测，之后复用 | 可手动指定 NAT 入站公网 IPv4 或具有 A 记录的域名 |
 | `S5_USER` | `s5proxy` | 专用账户名，不允许使用 root / nobody 或接管已有账户 |
 | `S5_PASSWORD` | 自动生成，之后复用 | 8–128 字节，不能含冒号、换行、NUL |
 | `EXTERNAL_IFACE` | 首次检测 IPv4 默认路由，之后复用 | 出口网卡，如 `eth0`；多网卡时可以明确指定 |

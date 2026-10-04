@@ -8,7 +8,8 @@ case "${1:-}" in
     cat <<'HELP'
 Usage: sh s5.sh [install|info|status|check|restart|update|uninstall]
 No argument: interactive menu (requires a terminal).
-Install: PORT=54352 PUBLIC_PORT=54352 PUBLIC_HOST=example.com sh s5.sh install
+Install: PORT=54352 sh s5.sh install
+Public IPv4 is detected automatically; override with PUBLIC_HOST if needed.
 Optional: S5_USER, S5_PASSWORD, EXTERNAL_IFACE, ADOPT_EXISTING=1, REGEN=1
 PORT is mandatory for first installation. PUBLIC_PORT defaults to PORT.
 SOCKS5 TCP CONNECT with username/password; UDP is intentionally disabled for NAT.
@@ -397,11 +398,38 @@ def host_value(value):
     return value
 
 
+def detect_public_host():
+    global STAGE
+    STAGE = '自动检测公网 IPv4'
+    errors = []
+    for url in ('https://api.ipify.org', 'https://ipv4.icanhazip.com', 'https://checkip.amazonaws.com'):
+        result = run(['curl', '--ipv4', '--fail', '--silent', '--show-error', '--noproxy', '*',
+                      '--connect-timeout', '5', '--max-time', '8', url], check=False)
+        value = result.stdout.strip()
+        if result.returncode == 0:
+            try:
+                address = ipaddress.ip_address(value)
+                if address.version == 4 and address.is_global:
+                    say('已自动检测公网 IPv4: ' + value)
+                    return value
+            except ValueError:
+                pass
+            errors.append(url + ': 返回的不是有效公网 IPv4')
+        else:
+            errors.append('{}: exit={} {}'.format(url, result.returncode, value[:240]))
+    fail('公网 IPv4 自动检测失败；可设置 PUBLIC_HOST=入站公网IP 后重试。\n' + '\n'.join(errors))
+
+
+def resolve_public_host(old):
+    value = os.environ.get('PUBLIC_HOST') or (old or {}).get('public_host')
+    return host_value(value) if value else detect_public_host()
+
+
 def settings(old):
     old = old or {}
     port = port_value(os.environ.get('PORT', str(old.get('port', ''))), 'PORT (内网监听端口)')
     public_port = port_value(os.environ.get('PUBLIC_PORT', str(old.get('public_port', port))), 'PUBLIC_PORT (外网映射端口)')
-    host = host_value(os.environ.get('PUBLIC_HOST', old.get('public_host', '')))
+    host = resolve_public_host(old)
     user = os.environ.get('S5_USER', old.get('user', 's5proxy'))
     if not re.fullmatch(r'[a-z_][a-z0-9_-]{0,30}', user) or user in ('root', 'nobody'):
         fail('S5_USER 必须是有效的小写 Linux 用户名，不能用 root / nobody')
@@ -533,7 +561,8 @@ def install():
     old = load(False)
     # Validate required inputs before installing additional packages.
     port_value(os.environ.get('PORT', str((old or {}).get('port', ''))), 'PORT (首次安装必须指定)')
-    host_value(os.environ.get('PUBLIC_HOST', (old or {}).get('public_host', '')))
+    if os.environ.get('PUBLIC_HOST'):
+        host_value(os.environ['PUBLIC_HOST'])
     dependencies()
     state = settings(old)
     STAGE = '检测账户 / 端口冲突'
@@ -675,7 +704,7 @@ def menu():
     try:
         terminal = open('/dev/tty', 'r+')
     except OSError:
-        fail('无交互终端；请指定命令，例如 PORT=54352 PUBLIC_HOST=你的公网IP sh s5.sh install')
+        fail('无交互终端；请指定命令，例如 PORT=54352 sh s5.sh install')
     with terminal:
         terminal.write('\nS5 一键脚本 — {}/{}\n1) 安装 / 修改配置\n2) 查看信息\n3) 状态\n4) 连通检查\n5) 更新 Dante\n6) 重启\n7) 卸载\n0) 退出\n选择: '.format(OS_ID, MANAGER))
         terminal.flush()
@@ -687,7 +716,7 @@ def menu():
             old = load(False) or {}
             for key, label, default in (('PORT', '内网监听端口', old.get('port', '')),
                                        ('PUBLIC_PORT', '外网映射端口', old.get('public_port', os.environ.get('PORT', ''))),
-                                       ('PUBLIC_HOST', '公网 IPv4 / 域名', old.get('public_host', ''))):
+                                       ('PUBLIC_HOST', '公网 IPv4 / 域名（留空自动检测）', old.get('public_host', ''))):
                 if key in os.environ:
                     continue
                 if key == 'PUBLIC_PORT' and not default:

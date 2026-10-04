@@ -1,5 +1,6 @@
 """Root-only integration tests for disposable CI containers, never production."""
 import json
+import ipaddress
 import os
 import pathlib
 import shutil
@@ -29,22 +30,25 @@ def main():
     assert not STATE.exists(), 'Only run inside a disposable clean container'
     assert 'PORT' in invoke('install', expected=1, PUBLIC_HOST='127.0.0.1')
     assert '65535' in invoke('install', expected=1, PORT=65536, PUBLIC_HOST='127.0.0.1')
-    assert 'PUBLIC_HOST' in invoke('install', expected=1, PORT=15432)
+    assert 'PUBLIC_HOST' in invoke('install', expected=1, PORT=15432, PUBLIC_HOST='bad/host')
     # Includes special characters to check curl configuration escaping and URI encoding.
     password = 'CI-only-$pass&"\\word'
-    invoke('install', PORT=15432, PUBLIC_HOST='127.0.0.1', S5_PASSWORD=password)
+    invoke('install', PORT=15432, S5_PASSWORD=password)
     first = json.loads(STATE.read_text())
     assert first['password'] == password
+    assert ipaddress.ip_address(first['public_host']).is_global
+    assert first['public_port'] == first['port']
     assert STATE.stat().st_mode & 0o777 == 0o600
     assert STATE.parent.stat().st_mode & 0o777 == 0o700
     invoke('check')
     invoke('restart')
     invoke('status')
     print('PASS: install, permissions, positive/negative authentication, HTTPS, restart')
-    invoke('install', PORT=15433, PUBLIC_PORT=25433)
+    invoke('install', PORT=15433, PUBLIC_PORT=25433, PUBLIC_HOST='127.0.0.1')
     second = json.loads(STATE.read_text())
     assert second['password'] == first['password'] and second['user'] == first['user']
     assert second['port'] == 15433 and second['public_port'] == 25433
+    assert second['public_host'] == '127.0.0.1'
     invoke('check')
     print('PASS: changed internal/public ports, preserved credentials')
     before_conf, before_state = CONF.read_bytes(), STATE.read_bytes()
