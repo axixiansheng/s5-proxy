@@ -549,10 +549,11 @@ def diagnostics():
 
 def show_info(state=None):
     state = state or load()
-    uri = 'socks5://{}:{}@{}:{}'.format(urllib.parse.quote(state['user'], safe=''),
-            urllib.parse.quote(state['password'], safe=''), state['public_host'], state['public_port'])
-    say('\n地址: {}\n外网端口: {}\n内网监听: {}\n用户名: {}\n密码: {}\n协议: SOCKS5 TCP / 用户名密码\n\nURI (是否可导入取决于客户端):\n{}'.format(
-        state['public_host'], state['public_port'], state['port'], state['user'], state['password'], uri))
+    link = 'https://t.me/socks?' + urllib.parse.urlencode([
+        ('server', state['public_host']), ('port', state['public_port']),
+        ('user', state['user']), ('pass', state['password'])], quote_via=urllib.parse.quote)
+    say('\n地址: {}\n外网端口: {}\n内网监听: {}\n用户名: {}\n密码: {}\n协议: SOCKS5 TCP / 用户名密码\n\nTelegram SOCKS5 链接:\n{}'.format(
+        state['public_host'], state['public_port'], state['port'], state['user'], state['password'], link))
     say('\nNAT 面板需映射 TCP {} → 本机 {}。脚本不会修改供应商映射或防火墙。'.format(state['public_port'], state['port']))
 
 

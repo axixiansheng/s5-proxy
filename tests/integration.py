@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import urllib.parse
 
 SCRIPT = '/workspace/s5.sh'
 STATE = pathlib.Path('/etc/s5-proxy/state.json')
@@ -25,16 +26,28 @@ def invoke(command, expected=0, **changes):
     return p.stdout
 
 
+def check_link(output, state):
+    links = [line for line in output.splitlines() if line.startswith('https://t.me/socks?')]
+    assert len(links) == 1, 'Expected one Telegram SOCKS5 link'
+    url = urllib.parse.urlsplit(links[0])
+    assert url.fragment == '', 'Password characters must not become a URL fragment'
+    query = urllib.parse.parse_qs(url.query, strict_parsing=True)
+    assert query == {'server': [state['public_host']], 'port': [str(state['public_port'])],
+                     'user': [state['user']], 'pass': [state['password']]}, query
+
+
 def main():
     assert os.geteuid() == 0
     assert not STATE.exists(), 'Only run inside a disposable clean container'
     assert 'PORT' in invoke('install', expected=1, PUBLIC_HOST='127.0.0.1')
     assert '65535' in invoke('install', expected=1, PORT=65536, PUBLIC_HOST='127.0.0.1')
     assert 'PUBLIC_HOST' in invoke('install', expected=1, PORT=15432, PUBLIC_HOST='bad/host')
-    # Includes special characters to check curl configuration escaping and URI encoding.
-    password = 'CI-only-$pass&"\\word'
-    invoke('install', PORT=15432, S5_PASSWORD=password)
+    # Verify curl escaping and client-side URL decoding with special characters / UTF-8.
+    password = 'CI-only-$pass&"\\ word+%#密码'
+    installed = invoke('install', PORT=15432, S5_PASSWORD=password)
     first = json.loads(STATE.read_text())
+    check_link(installed, first)
+    check_link(invoke('info'), first)
     assert first['password'] == password
     assert ipaddress.ip_address(first['public_host']).is_global
     assert first['public_port'] == first['port']
@@ -44,8 +57,9 @@ def main():
     invoke('restart')
     invoke('status')
     print('PASS: install, permissions, positive/negative authentication, HTTPS, restart')
-    invoke('install', PORT=15433, PUBLIC_PORT=25433, PUBLIC_HOST='127.0.0.1')
+    installed = invoke('install', PORT=15433, PUBLIC_PORT=25433, PUBLIC_HOST='127.0.0.1')
     second = json.loads(STATE.read_text())
+    check_link(installed, second)
     assert second['password'] == first['password'] and second['user'] == first['user']
     assert second['port'] == 15433 and second['public_port'] == 25433
     assert second['public_host'] == '127.0.0.1'

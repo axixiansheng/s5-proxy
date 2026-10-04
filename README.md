@@ -100,7 +100,7 @@ ADOPT_EXISTING=1 PORT=54352 PUBLIC_HOST=203.0.113.10 sh /root/s5.sh install
 ## 管理命令
 
 ```sh
-sh /root/s5.sh info       # 查看地址、内外端口、账户及 URI
+sh /root/s5.sh info       # 查看地址、内外端口、账户及 Telegram SOCKS5 链接
 sh /root/s5.sh status     # 查看服务与监听
 sh /root/s5.sh check      # 正确/错误密码、匿名拒绝、SOCKS5 HTTPS 出站及远端 DNS
 sh /root/s5.sh restart    # 重启并验证
@@ -110,7 +110,13 @@ sh /root/s5.sh uninstall  # 卸载本脚本服务、配置、专用账户；恢�
 
 CLI 的 `uninstall` 不再询问；菜单卸载需输入 `yes`。共享的系统依赖、Dante 软件包及后备源码核心不卸载，避免影响原服务。后备核心位于 `/usr/local/lib/s5-proxy-core/danted`，版本固定为 `1.4.4`；`update` 检查 / 补齐此版本，不自动追踪未知源码版本。更新失败时报告错误；系统软件包更新不自动降级。安装失败回滚不卸载已经安装的系统依赖或撤销软件源补充。
 
-节点信息中提供通用 `socks5://用户:密码@地址:端口` URI，客户端是否支持直接导入取决于自身格式；不支持时手动填写四个字段。
+安装完成及 `info` 输出 [Telegram SOCKS5 链接](https://core.telegram.org/api/links#socks5-proxy-links)，格式如下：
+
+```text
+https://t.me/socks?server=公网地址&port=外网映射端口&user=用户名&pass=密码
+```
+
+点击链接可在 Telegram 中导入代理。链接使用实际节点参数，`port` 为 `PUBLIC_PORT`（外网映射端口）；密码等参数中的 `&`、`+`、`#`、空格及非 ASCII 字符会自动进行 URL 编码。其他 SOCKS5 客户端仍可按输出的地址、端口、用户名、密码手动填写。
 
 ## 排查问题
 
