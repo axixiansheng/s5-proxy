@@ -1,0 +1,7 @@
+*.log
+*.pem
+*.key
+state.json
+node-info.txt
+__pycache__/
+.venv/

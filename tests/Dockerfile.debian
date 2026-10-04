@@ -1,0 +1,6 @@
+ARG DEBIAN_VERSION=bookworm
+FROM debian:${DEBIAN_VERSION}-slim
+# Only provide the init system; the installer must supply its own dependencies.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd-sysv && rm -rf /var/lib/apt/lists/*
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

@@ -1,0 +1,53 @@
+name: Test installer
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh -n s5.sh && python3 tests/validate.py
+      - run: shellcheck --shell=sh s5.sh
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [alpine-3.21, alpine-3.22, debian-bookworm, debian-trixie]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Alpine minimal bootstrap and integration
+        if: startsWith(matrix.os, 'alpine')
+        env:
+          TARGET: ${{ matrix.os }}
+        run: |
+          version="${TARGET#alpine-}"
+          docker run --rm --privileged -v "$PWD:/workspace:ro" "alpine:$version" sh -ec '
+            apk add --no-cache openrc
+            mkdir -p /run/openrc
+            touch /run/openrc/softlevel
+            rc-update add networking default
+            # A Docker network is already configured; mark it as provided to OpenRC.
+            mkdir -p /run/openrc/started
+            touch /run/openrc/started/networking
+            PORT=15431 PUBLIC_HOST=127.0.0.1 sh /workspace/s5.sh install >/tmp/bootstrap.log 2>&1 || { cat /tmp/bootstrap.log; exit 1; }
+            sh /workspace/s5.sh uninstall
+            python3 /workspace/tests/integration.py
+          '
+      - name: Debian systemd bootstrap and integration
+        if: startsWith(matrix.os, 'debian')
+        env:
+          TARGET: ${{ matrix.os }}
+        run: |
+          version="${TARGET#debian-}"
+          docker build --build-arg "DEBIAN_VERSION=$version" -f tests/Dockerfile.debian -t s5-test .
+          docker run --name s5-test --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD:/workspace:ro" -d s5-test
+          trap 'docker rm -f s5-test >/dev/null' EXIT
+          for n in $(seq 1 30); do docker exec s5-test test -d /run/systemd/system && break; sleep 1; done
+          docker exec s5-test sh -ec '
+            PORT=15431 PUBLIC_HOST=127.0.0.1 sh /workspace/s5.sh install >/tmp/bootstrap.log 2>&1 || { cat /tmp/bootstrap.log; exit 1; }
+            sh /workspace/s5.sh uninstall
+            python3 /workspace/tests/integration.py
+          '
