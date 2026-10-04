@@ -46,8 +46,11 @@ jobs:
           docker run --name s5-test --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD:/workspace:ro" -d s5-test
           trap 'docker rm -f s5-test >/dev/null' EXIT
           for n in $(seq 1 30); do docker exec s5-test test -d /run/systemd/system && break; sleep 1; done
+          # /run/systemd/system exists before boot mounts and tmpfiles have settled.
+          # A minimal container can be degraded; wait for boot completion either way.
+          timeout 60 docker exec s5-test systemctl is-system-running --wait || true
           docker exec s5-test sh -ec '
-            PORT=15431 PUBLIC_HOST=127.0.0.1 sh /workspace/s5.sh install >/tmp/bootstrap.log 2>&1 || { cat /tmp/bootstrap.log; exit 1; }
+            PORT=15431 PUBLIC_HOST=127.0.0.1 sh /workspace/s5.sh install >/root/bootstrap.log 2>&1 || { cat /root/bootstrap.log; exit 1; }
             sh /workspace/s5.sh uninstall
             python3 /workspace/tests/integration.py
           '

@@ -30,9 +30,14 @@ if ! command -v python3 >/dev/null 2>&1; then
   if [ "$ID" = alpine ]; then
     apk add --no-cache python3 || { echo '错误: python3 安装失败；检查上面的 apk 错误、软件源、DNS、网络及磁盘空间。' >&2; exit 1; }
   else
-    apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update &&
-    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 install -y --no-install-recommends python3 ||
-      { echo '错误: python3 安装失败；检查上面的 apt 错误、软件源、锁、网络及磁盘空间。' >&2; exit 1; }
+    if ! apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update; then
+      echo '错误: apt 软件源刷新失败；检查上面的软件源、DNS、网络及磁盘空间错误。' >&2
+      exit 1
+    fi
+    if ! DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 install -y --no-install-recommends python3; then
+      echo '错误: python3 安装失败；检查上面的 apt 错误、软件源、锁、网络及磁盘空间。' >&2
+      exit 1
+    fi
   fi
 fi
 exec python3 - "$@" <<'PY'
