@@ -532,7 +532,7 @@ def install():
                 stopped_legacy = True
                 autostart(False, legacy)
             autostart(True)
-            svc('restart')
+            svc('restart' if was_active else 'start')
             health(state)
             atomic(STATE, json.dumps(state, ensure_ascii=False, indent=2) + '\n')
         except BaseException:
@@ -665,14 +665,14 @@ def main():
         check()
     elif command == 'restart':
         state = load()
-        svc('restart')
+        svc('restart' if active() else 'start')
         health(state)
         say('已重启并验证认证')
     elif command == 'update':
         state = load()
         dependencies(update=True)
         run([BIN, '-V', '-f', str(CONF)])
-        svc('restart')
+        svc('restart' if active() else 'start')
         health(state)
         say('Dante 已按系统软件源更新；端口和账户保留。软件包版本不会自动降级')
     elif command == 'uninstall':
