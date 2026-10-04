@@ -62,7 +62,7 @@ PORT=1080 PUBLIC_PORT=54352 PUBLIC_HOST=203.0.113.10 bash <(curl -fsSL https://r
 
 - 自动安装缺失依赖，Alpine 缺少 community 时补充同版本源，不混用 edge。Debian 使用 apt，保留原有包服务启动策略。
 - 优先使用发行版软件源中的 Dante，按系统架构获取原生软件包。Debian 13 等软件源缺包时，自动补齐编译依赖，从 [Dante 官方](https://www.inet.no/dante/download.html)下载固定 `1.4.4` 源码、验证官方 SHA256 后单线程构建；不混用其他 Debian 版本的软件源。
-- 单独管理 `s5-proxy` 服务，不修改 SSH 端口。设置开机启动，并验证服务、监听及 SOCKS5 认证后才报告成功。
+- 单独管理 `s5-proxy` 服务，不修改 SSH 端口。设置开机启动，并验证服务、监听及 SOCKS5 认证后才报告本机部署成功；公网映射需从另一台机器验证。
 - 默认生成随机密码，创建禁止交互登录的专用系统账户；规则仅允许这个账户使用代理，拒绝其他系统账户和匿名连接。
 - 重复安装保留账号密码及已有参数；设置 `PORT` / `PUBLIC_PORT` 可修改端口，`REGEN=1` 重新生成密码。
 - 配置变更前校验 Dante；切换失败时恢复配置、账户密码、开机启动及原服务。互斥锁防止多个安装同时修改配置。
@@ -133,9 +133,21 @@ journalctl -u s5-proxy -n 50 --no-pager
 
 端口本机可用而外网不通时，核对供应商入站公网地址、外网到内网的 **TCP** 映射、防火墙及客户端账号。`check` 验证本机到外网的代理链路，不代表供应商入站映射一定正确。
 
+在另一台机器上进行实际公网测试（将示例地址、端口和账号替换成自己的值）：
+
+```sh
+# curl 会提示输入代理密码；避免把密码直接放进命令参数。
+curl --proxy socks5h://203.0.113.10:54352 --proxy-user s5proxy \
+  --noproxy '' --connect-timeout 10 --max-time 30 --fail --show-error https://api.ipify.org
+```
+
+输出代理服务器的出口 IP 才表示 SOCKS5 认证、远端 DNS 和 HTTPS 均已通过。`socks5h` 会让代理服务器解析目标域名。测试时也应确认错误密码和匿名访问被拒绝。
+
+如果本机 `check` 和另一网络的公网测试都通过，但某个网络卡在 SOCKS5 握手，先排查该网络到服务器的链路。TCP 端口连接成功只能证明连接建立；仍需确认 SOCKS5 握手数据是否到达、服务器回复是否返回。安装成功信息会明确说明公网尚未验证，避免将本机自检误认为供应商映射已经通过。
+
 ## 自动测试
 
-GitHub Actions 在 Alpine 3.21 / 3.22、Debian 12 / 13 的隔离容器中验证：精简系统依赖补齐、实际服务管理、认证、HTTPS 出站、端口修改、重复安装、端口冲突、启动失败回滚、更新、卸载及原 Dante 迁移恢复。另检查 shell / 内嵌 Python 语法与 ShellCheck。
+GitHub Actions 在 Alpine 3.21 / 3.22 / 3.23、Debian 12 / 13 的隔离容器中验证：精简系统依赖补齐、实际服务管理、认证、HTTPS 出站、端口修改、重复安装、端口冲突、启动失败回滚、更新、卸载及原 Dante 迁移恢复。另检查 shell / 内嵌 Python 语法与 ShellCheck。
 
 `tests/integration.py` 只用于一次性测试容器，**不要在生产服务器上运行**。Ubuntu 和无 systemd 的 SysV 分支有适配代码，但当前不在自动测试矩阵中。
 

@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [alpine-3.21, alpine-3.22, debian-bookworm, debian-trixie]
+        os: [alpine-3.21, alpine-3.22, alpine-3.23, debian-bookworm, debian-trixie]
     steps:
       - uses: actions/checkout@v4
       - name: Alpine minimal bootstrap and integration

@@ -652,7 +652,8 @@ def install():
                     autostart(True, legacy, check=False)
                 svc('start', legacy, check=False)
             raise
-    say('部署成功：服务运行、端口监听、正确密码认证、错误密码及匿名拒绝均已验证。')
+    say('本机部署成功：服务运行、端口监听、正确密码认证、错误密码及匿名拒绝均已验证。')
+    say('公网连通性尚未验证；请从另一台机器通过映射端口测试 SOCKS5 认证及 HTTPS，单独 TCP 连通不代表代理可用。')
     show_info(state)
 
 
