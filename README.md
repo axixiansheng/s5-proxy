@@ -9,7 +9,7 @@
 以 **root** 执行。以下命令适用于精简 Alpine、Debian 和 Ubuntu：先补齐下载工具与 CA 证书，下载成功后才运行脚本；下载或安装失败会保留错误并返回非零退出码。
 
 ```sh
-sh -c 'set -eu; umask 077; if command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl; elif command -v apt-get >/dev/null 2>&1; then apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update; DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates curl; else echo "错误: 仅支持 Alpine / Debian / Ubuntu" >&2; exit 1; fi; f=$(mktemp); trap '''rm -f "$f"''' EXIT; curl -fSL --retry 3 --connect-timeout 10 --max-time 90 https://raw.githubusercontent.com/axixiansheng/s5-proxy/main/s5.sh -o "$f"; sh "$f" "$@"' s5
+sh -c 'set -eu; umask 077; if command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl; elif command -v apt-get >/dev/null 2>&1; then apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update; DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates curl; else echo "错误: 仅支持 Alpine / Debian / Ubuntu" >&2; exit 1; fi; f=$(mktemp); trap "rm -f \"$f\"" EXIT; curl -fSL --retry 3 --connect-timeout 10 --max-time 90 https://raw.githubusercontent.com/axixiansheng/s5-proxy/main/s5.sh -o "$f"; sh "$f" "$@"' s5
 ```
 
 无参数进入菜单，安装时填写 **内网监听端口、外网映射端口、公网 IPv4 或域名**。不自动把 NAT 出口 IP 当作入站地址。
