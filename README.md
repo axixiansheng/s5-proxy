@@ -43,7 +43,7 @@ PORT=1080 PUBLIC_PORT=54352 PUBLIC_HOST=203.0.113.10 sh /root/s5.sh install
 ## 特性与行为
 
 - 自动安装缺失依赖，Alpine 缺少 community 时补充同版本源，不混用 edge。Debian 使用 apt，保留原有包服务启动策略。
-- 使用发行版软件源中的 Dante，按系统架构获取原生软件包；无需自己下载或编译核心。
+- 优先使用发行版软件源中的 Dante，按系统架构获取原生软件包。Debian 13 等软件源缺包时，自动补齐编译依赖，从 [Dante 官方](https://www.inet.no/dante/download.html)下载固定 `1.4.4` 源码、验证官方 SHA256 后单线程构建；不混用其他 Debian 版本的软件源。
 - 单独管理 `s5-proxy` 服务，不修改 SSH 端口。设置开机启动，并验证服务、监听及 SOCKS5 认证后才报告成功。
 - 默认生成随机密码，创建禁止交互登录的专用系统账户；规则仅允许这个账户使用代理，拒绝其他系统账户和匿名连接。
 - 重复安装保留账号密码及已有参数；设置 `PORT` / `PUBLIC_PORT` 可修改端口，`REGEN=1` 重新生成密码。
@@ -90,7 +90,7 @@ sh /root/s5.sh update     # 根据发行版软件源更新 Dante，保留配置�
 sh /root/s5.sh uninstall  # 卸载本脚本服务、配置、专用账户；恢复被迁移的原服务
 ```
 
-CLI 的 `uninstall` 不再询问；菜单卸载需输入 `yes`。共享的系统依赖和 Dante 软件包不卸载，避免影响原服务。更新失败时报告错误；系统软件包更新不自动降级。安装失败回滚不卸载已经安装的系统依赖或撤销软件源补充。
+CLI 的 `uninstall` 不再询问；菜单卸载需输入 `yes`。共享的系统依赖、Dante 软件包及后备源码核心不卸载，避免影响原服务。后备核心位于 `/usr/local/lib/s5-proxy-core/danted`，版本固定为 `1.4.4`；`update` 检查 / 补齐此版本，不自动追踪未知源码版本。更新失败时报告错误；系统软件包更新不自动降级。安装失败回滚不卸载已经安装的系统依赖或撤销软件源补充。
 
 节点信息中提供通用 `socks5://用户:密码@地址:端口` URI，客户端是否支持直接导入取决于自身格式；不支持时手动填写四个字段。
 
@@ -108,6 +108,9 @@ tail -n 50 /var/log/s5-proxy.log
 systemctl status s5-proxy --no-pager
 journalctl -u s5-proxy -n 50 --no-pager
 /usr/sbin/danted -V -f /etc/s5-proxy/sockd.conf
+
+# Debian 软件源缺包、使用后备源码核心时
+/usr/local/lib/s5-proxy-core/danted -V -f /etc/s5-proxy/sockd.conf
 ```
 
 端口本机可用而外网不通时，核对供应商入站公网地址、外网到内网的 **TCP** 映射、防火墙及客户端账号。`check` 验证本机到外网的代理链路，不代表供应商入站映射一定正确。

@@ -30,7 +30,7 @@ jobs:
             touch /run/openrc/softlevel
             rc-update add networking default
             # A Docker network is already configured; mark it as provided to OpenRC.
-            mkdir -p /run/openrc/started
+            mkdir -p /run/openrc/started /run/openrc/exclusive
             touch /run/openrc/started/networking
             PORT=15431 PUBLIC_HOST=127.0.0.1 sh /workspace/s5.sh install >/tmp/bootstrap.log 2>&1 || { cat /tmp/bootstrap.log; exit 1; }
             sh /workspace/s5.sh uninstall

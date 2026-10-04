@@ -44,6 +44,7 @@ exec python3 - "$@" <<'PY'
 import contextlib
 import datetime
 import getpass
+import hashlib
 import ipaddress
 import json
 import os
@@ -67,6 +68,9 @@ STATE = BASE / 'state.json'
 BACKUP = BASE / 'original'
 LOG = pathlib.Path('/var/log/s5-proxy-installer.log')
 SERVICE = 's5-proxy'
+CORE = pathlib.Path('/usr/local/lib/s5-proxy-core')
+SOURCE_VERSION = '1.4.4'
+SOURCE_SHA256 = '1973c7732f1f9f0a4c0ccf2c1ce462c7c25060b25643ea90f9b98f53a813faec'
 STAGE = '初始化'
 OS_ID = ''
 MANAGER = ''
@@ -86,11 +90,11 @@ def say(message):
     print(message, flush=True)
 
 
-def run(args, *, check=True, secret_input=None):
+def run(args, *, check=True, secret_input=None, cwd=None, timeout=300):
     # Never log credential input or put passwords in command arguments.
     with LOG.open('a', encoding='utf-8') as log:
         log.write('\n[' + STAGE + '] ' + ' '.join(args) + '\n')
-        result = subprocess.run(args, input=secret_input, text=True, timeout=300,
+        result = subprocess.run(args, input=secret_input, text=True, timeout=timeout, cwd=cwd,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 env=dict(os.environ, LC_ALL='C', DEBIAN_FRONTEND='noninteractive'))
         output = result.stdout or ''
@@ -146,6 +150,8 @@ def initialize():
         MANAGER, BIN = 'systemd', '/usr/sbin/danted'
     else:
         MANAGER, BIN = 'sysv', '/usr/sbin/danted'
+    if OS_ID != 'alpine' and not pathlib.Path(BIN).exists() and (CORE / 'danted').exists():
+        BIN = str(CORE / 'danted')
     if STATE.exists():
         BASE.chmod(0o700)
 
@@ -173,10 +179,47 @@ def package_present(package):
     return result.returncode == 0 and (OS_ID == 'alpine' or result.stdout.strip() == 'install ok installed')
 
 
+def build_source():
+    global STAGE, BIN
+    binary = CORE / 'danted'
+    marker = CORE / 'version'
+    if binary.exists() and marker.exists() and marker.read_text().strip() == SOURCE_VERSION:
+        BIN = str(binary)
+        return
+    if CORE.exists() and not marker.exists():
+        fail('源码核心目录已存在但没有本脚本版本标记，拒绝覆盖: ' + str(CORE))
+    STAGE = '下载 / SHA256 校验 / 编译官方 Dante'
+    say('软件源没有 Dante；构建官方 Dante {}（单线程，可能需要几分钟）...'.format(SOURCE_VERSION))
+    with tempfile.TemporaryDirectory(prefix='s5-build-') as tmp:
+        archive = pathlib.Path(tmp) / 'dante.tar.gz'
+        url = 'https://www.inet.no/dante/files/dante-{}.tar.gz'.format(SOURCE_VERSION)
+        run(['curl', '--fail', '--location', '--retry', '3', '--connect-timeout', '10', '--max-time', '120', url, '-o', str(archive)])
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        if digest != SOURCE_SHA256:
+            fail('官方源码 SHA256 不匹配，拒绝执行；预期 {}，实际 {}'.format(SOURCE_SHA256, digest))
+        run(['tar', '-xzf', str(archive), '-C', tmp])
+        source = pathlib.Path(tmp) / ('dante-' + SOURCE_VERSION)
+        run(['./configure', '--prefix=/usr/local', '--disable-client', '--without-pam',
+             '--without-libwrap', '--without-gssapi', '--without-upnp'], cwd=str(source))
+        run(['make', '-j1'], cwd=str(source), timeout=900)
+        built = source / 'sockd' / 'sockd'
+        run([str(built), '-v'])
+        CORE.mkdir(mode=0o755, parents=True, exist_ok=True)
+        CORE.chmod(0o755)
+        staging = CORE / '.danted-new'
+        shutil.copyfile(str(built), str(staging))
+        staging.chmod(0o755)
+        os.replace(str(staging), str(binary))
+        atomic(marker, SOURCE_VERSION + '\n', 0o644)
+    BIN = str(binary)
+
+
 def dependencies(update=False):
-    global STAGE
+    global STAGE, BIN
     STAGE = '检测 / 安装系统依赖'
-    packages = ['ca-certificates', 'curl', 'iproute2', 'dante-server']
+    packages = ['ca-certificates', 'curl', 'iproute2']
+    if OS_ID == 'alpine':
+        packages.append('dante-server')
     packages += ['openrc', 'shadow'] if OS_ID == 'alpine' else ['passwd', 'init-system-helpers']
     missing = [p for p in packages if not package_present(p)]
     if OS_ID == 'alpine':
@@ -197,25 +240,42 @@ def dependencies(update=False):
         if update:
             run(['apk', 'upgrade', '--no-cache', 'dante-server'])
     else:
-        if missing or update:
+        native_installed = package_present('dante-server')
+        if missing or update or not native_installed:
             say('刷新 apt 软件源；将安装: ' + ', '.join(missing or ['dante-server']))
             run(['apt-get', '-o', 'Acquire::Retries=3', '-o', 'Acquire::http::Timeout=30', '-o', 'Acquire::https::Timeout=30', 'update'])
+            candidate = run(['apt-cache', 'policy', 'dante-server'], check=False).stdout
+            native_available = bool(re.search(r'Candidate:\s+(?!\(none\))\S+', candidate)) or native_installed
+            if native_available:
+                if not native_installed or update:
+                    missing.append('dante-server')
+            else:
+                for package in ('build-essential', 'libcrypt-dev', 'tar'):
+                    if not package_present(package):
+                        missing.append(package)
             # Suppress only package auto-start, and preserve any administrator policy.
             policy = pathlib.Path('/usr/sbin/policy-rc.d')
             added_policy = not os.path.lexists(str(policy))
             if added_policy:
                 atomic(policy, '#!/bin/sh\nexit 101\n', 0o755)
             try:
-                run(['apt-get', '-o', 'DPkg::Lock::Timeout=60', '-o', 'Acquire::Retries=3',
-                     'install', '-y', '--no-install-recommends'] + (missing or ['dante-server']))
+                if missing:
+                    run(['apt-get', '-o', 'DPkg::Lock::Timeout=60', '-o', 'Acquire::Retries=3',
+                         'install', '-y', '--no-install-recommends'] + missing)
             finally:
                 if added_policy:
                     policy.unlink()
+            if not native_available:
+                build_source()
+            else:
+                BIN = '/usr/sbin/danted'
     commands = [BIN, 'curl', 'ip', 'useradd', 'userdel', 'chpasswd']
     commands += ['rc-service', 'rc-update'] if MANAGER == 'openrc' else (['systemctl'] if MANAGER == 'systemd' else ['start-stop-daemon', 'update-rc.d'])
     for command in commands:
         if not shutil.which(command):
             fail('依赖安装后仍找不到命令: ' + command)
+    if MANAGER == 'openrc' and not pathlib.Path('/run/openrc/softlevel').exists():
+        fail('OpenRC 运行环境尚未初始化；实际 Alpine 主机请完成 OpenRC 启动，容器请使用带 init 的镜像')
     try:
         pwd.getpwnam('nobody')
     except KeyError:
@@ -292,6 +352,7 @@ start_pre() { "$command" -V -f /etc/s5-proxy/sockd.conf; }
 depend() { need net; after firewall; use dns; }
 '''
         atomic(service_file(), text, 0o755)
+        run(['rc-update', '--update'])
     else:
         text = '''#!/bin/sh
 ### BEGIN INIT INFO
@@ -314,6 +375,7 @@ case "$1" in
  *) echo "Usage: $0 {start|stop|restart|status}" >&2; exit 2 ;;
 esac
 '''
+        text = text.replace('DAEMON=/usr/sbin/danted', 'DAEMON=' + BIN)
         atomic(service_file(), text, 0o755)
 
 
@@ -674,7 +736,7 @@ def main():
         run([BIN, '-V', '-f', str(CONF)])
         svc('restart' if active() else 'start')
         health(state)
-        say('Dante 已按系统软件源更新；端口和账户保留。软件包版本不会自动降级')
+        say('Dante 已检查 / 更新；端口和账户保留。软件源缺包时使用已校验的官方 {} 源码核心'.format(SOURCE_VERSION))
     elif command == 'uninstall':
         uninstall()
     elif command == 'exit':

@@ -77,6 +77,8 @@ def main():
     # Run the normal legacy daemon and verify the adoption / restoration path.
     alpine = pathlib.Path('/etc/alpine-release').exists()
     binary = '/usr/sbin/sockd' if alpine else '/usr/sbin/danted'
+    if not pathlib.Path(binary).exists():
+        binary = '/usr/local/lib/s5-proxy-core/danted'
     legacy = 'sockd' if alpine else 'danted'
     config = pathlib.Path('/etc/sockd.conf' if alpine else '/etc/danted.conf')
     routes = json.loads(subprocess.check_output(['ip', '-j', '-4', 'route', 'show', 'default'], text=True))
@@ -86,6 +88,9 @@ def main():
         subprocess.run(['rc-update', 'add', legacy, 'default'], check=True)
         subprocess.run(['rc-service', legacy, 'start'], check=True)
     else:
+        if binary.startswith('/usr/local/'):
+            pathlib.Path('/etc/systemd/system/danted.service').write_text('[Unit]\nDescription=Legacy Dante for adoption test\n[Service]\nExecStart={} -f /etc/danted.conf\n[Install]\nWantedBy=multi-user.target\n'.format(binary))
+            subprocess.run(['systemctl', 'daemon-reload'], check=True)
         subprocess.run(['systemctl', 'enable', legacy], check=True)
         subprocess.run(['systemctl', 'start', legacy], check=True)
     original = config.read_bytes()
